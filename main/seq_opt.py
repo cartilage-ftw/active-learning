@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
-import wazy
-import jax
+import wazy, jax
 import matplotlib.pyplot as plt
-import time
+import time, sys
 
 import warnings
 # I wanted to suppress the stupid warnings in the terminal output
@@ -15,7 +14,9 @@ plt.rcParams['text.usetex'] = True
 plt.rcParams['font.family'] = 'serif'
 plt.rcParams['font.serif'] = ['Computer Modern Serif']
 
-key = jax.random.PRNGKey(0)
+# seed to use for the pseudo random generator
+seed = 0
+key = jax.random.PRNGKey(seed)
 
 """
 Load the sequences to train with
@@ -38,7 +39,8 @@ validation_seqs = pd.read_csv('../data/validation_set.csv')
 # those have very negative B_22 values. For the present purpose, I'm discarding those
 validation_seqs = validation_seqs.iloc[:42]
 
-def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True):
+
+def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True, start_count=0):
 	"""
 	This method does a pure learning of the Bayesian Optimizer
 	and records a "training history", at each training step by storing the 
@@ -56,7 +58,7 @@ def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True):
 		if predict_labels == True:
 			predicted_labels = []
 			# now check how well the prediction goes
-			print(f'Predicting seq labels after training step {i+1}')
+			print(f'Predicting seq labels after training step {start_count+i+1}')
 			ti = time.time()
 			for j in range(len(test_data)):
 				test_seq, test_seq_b22, seq_source_category = test_data.iloc[j]
@@ -64,34 +66,35 @@ def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True):
 				# pred_b22 has shape (3,) and contains prediction, err, and epistemic err
 				predicted_labels.append(-np.array(pred_b22))
 			tf = time.time()
-			print(f'Took {tf-ti} secs to predict for {len(predicted_labels)} sequences in')
+			print(f'Took {tf-ti} secs to predict for {len(predicted_labels)} sequences in step {start_count+i+1}')
 			# add predictions of this step to history
+			predictions = pd.Series(-np.array(predicted_labels)[:, 0], name=f'Pred {start_count+i+1} B22')
 			residuals = pd.Series(np.array(predicted_labels)[:, 0] - test_data['Numeric Label'],
-						 	name=f'Pred {i+51} Residual')
+						 	name=f'Pred {start_count + i + 1} Residual')
 			# for uncertainty, sum both statistical and systematic uncertainty in quadrature
 			errors = pd.Series(np.sqrt(np.array(predicted_labels)[:, 1]**2
 											+ np.array(predicted_labels)[:, 2]**2),
-							 name=f'Pred {i+51} Err')
+							 name=f'Pred {i+start_count+1} Err')
 			#training_hist = pd.concat([training_hist, residuals, errors], axis=1)
+			indiv_step_hist.append(predictions)
 			indiv_step_hist.append(residuals)
 			indiv_step_hist.append(errors)
 	# sequences against which the training was evaluated against
 	tested_sequences = test_data['Sequence']
-	training_hist = pd.concat([tested_sequences, *indiv_step_hist])
+	training_hist = pd.concat([tested_sequences, *indiv_step_hist], axis=1)
 	print('Successfully trained with', len(training_data), ' sequences')
 	
-	'''next_pred_list = []
-	for i in range(len(predict_next)):
-		seq, numeric_label = predict_next.iloc[i]
-		next_pred = bo_alg.predict(key, seq)
-		print(next_pred)'''
-	#print(next_pred_list)
 	return num_training_steps, training_hist
 
 
-def plot_training_hist(training_hist, num_train_steps, train_lengths=None):
+
+
+def plot_training_hist_legacy(training_hist, num_train_steps, train_lengths=None):
 	"""
 	Plots the mean squared deviation every training step
+
+	NOTE: This is not the method in use now; when I started working, I was storing residuals and 
+	uncertainties in the prediction. I've switched to storing the actual predicted values
 	"""
 	steps = np.linspace(1, num_train_steps, num_train_steps)
 	mse = []
@@ -104,7 +107,7 @@ def plot_training_hist(training_hist, num_train_steps, train_lengths=None):
 
 	mse = np.array(mse)
 	avg_pred_err = np.array(avg_pred_err) # to allow the use of +/- operation on entire list
-	print("predicted error", avg_pred_err)
+	#print("predicted error", avg_pred_err)
 	plt.plot(steps, mse, label=r'Validation Set')
 	plt.fill_between(steps, y1=mse+avg_pred_err, y2=mse-avg_pred_err, alpha=0.6,)
 
@@ -122,7 +125,7 @@ def plot_training_hist(training_hist, num_train_steps, train_lengths=None):
 	ax.legend(loc='upper right')
 	ax.tick_params(axis='both', which='major', length=6, labelsize=13)
 	ax.axhline(y=0, xmin=0, xmax=1, ls='--', lw=0.5, c='dimgray')
-	plt.xlabel('Training Step', fontsize=13)
+	plt.xlabel('Optimization Step', fontsize=13)
 	plt.ylabel('Mean Squared Error', fontsize=13)
 	
 	plt.tight_layout()
@@ -153,16 +156,40 @@ def plot_training_indiv(training_hist, num_train_steps):
 
 
 if __name__ == "__main__":
+	# The keyword arguments passed to python when running this file
+	args = sys.argv
+
+	# Initialize the Bayesian Optimization algorithm
 	b_optimizer = wazy.BOAlgorithm()
-	'''num_train_init, train_hist_init = train_bo_seqs(b_optimizer, seq_b22.iloc[:50], validation_seqs,
-												 predict_labels=False)
-	num_train_steps, training_hist = train_bo_seqs(b_optimizer, seq_b22.iloc[50:100], validation_seqs,
-												 predict_labels=True)'''
+	slice_after = 50
 	
-	date_stamp = time.strftime("%b%d", time.gmtime()).lower() # e.g. feb14
-	#training_hist.to_csv(f"training_hist_{date_stamp}.csv", index=False)
-	training_hist = pd.read_csv('training_hist_feb27_subset1.csv')
-	plot_training_hist(training_hist, 50, [50])
+	if len(args) > 1:
+		slice_after = int(args[1])
+
+	num_train_init, train_hist_init = train_bo_seqs(b_optimizer, seq_b22.iloc[:slice_after], validation_seqs,
+												 predict_labels=False)
+
+	num_train_steps, training_hist = train_bo_seqs(b_optimizer, seq_b22.iloc[slice_after:slice_after+50], validation_seqs,
+												 predict_labels=True, start_count=slice_after)
+
+	print('Next sequences to simulate:', b_optimizer.batch_ask(key, 25))
+	time_stamp = time.strftime("%b%d_%H-%M", time.gmtime()).lower() # e.g. feb14
+	training_hist.to_csv(f"training_hist_{time_stamp}.csv", index=False)
+
+	#training_hist.
+	training_hist_prev = pd.read_csv('training_hist_feb27_subset1.csv')
+	train_hist_50_100 = pd.read_csv("training_hist_51_100.csv")
+	train_hist_100_150 = pd.read_csv('training_hist_mar20_101_150.csv')
+	train_hist_150_200 = pd.read_csv('training_hist_mar20_151_200.csv')
+	total_train_hist = pd.concat([training_hist_prev, train_hist_50_100.drop('Sequence', axis=1),
+							   train_hist_100_150.drop('Sequence', axis=1),
+							   train_hist_150_200.drop('Sequence', axis=1)],
+							   axis=1)
+	
+	#training_hist.to_csv(f"training_hist_{time_stamp}.csv", index=False)
+	#total_train_hist.to_csv(f"total_training_hist_mar20.csv", index=False)
+	#plot_training_hist(training_hist_prev, 50, [50])
+	#plot_training_hist_legacy(total_train_hist, 200, [200])
 	'''num_train_steps2, training_hist2 = train_bo_seqs(b_optimizer, seq_set5, validation_seqs, predict_labels=True)
 	
 	plot_training_hist(training_hist2, num_train_steps2)'''
@@ -170,14 +197,13 @@ if __name__ == "__main__":
 	#total_train_steps = 63 + 21
 	#training_hist = pd.read_csv('training_hist_feb11 (copy).csv')
 	#train_hist2 = pd.read_csv('training_hist_feb14_last.csv')
-	#train_hist2 = train_hist2.drop('Sequence', axis=1)
+	#train_hist2 = xverl
 	#total_train_hist = pd.read_csv('training_hist_feb14.csv')#pd.concat([training_hist, train_hist2], axis=1)
 	#otal_train_hist.to_csv('training_hist_feb14.csv', index=False)
 	#num_train_steps = 42
 	#plot_training_hist(total_train_hist, total_train_steps, [21, 10, 11, 21, 21])
 	#plot_training_indiv(training_hist, num_train_steps)
 
-	#print('Next sequences to simulate:', b_optimizer.batch_ask(key, 42))
 	   # print('Using validation sequences for training')
 	'''for i in range(len(validation_seqs)):
 		seq, label = validation_seqs.iloc[i]
