@@ -4,10 +4,13 @@ import wazy, jax
 import matplotlib.pyplot as plt
 import time, sys
 
+from sklearn.model_selection import train_test_split
+
 import warnings
 # I wanted to suppress the stupid warnings in the terminal output
 warnings.filterwarnings("default", category=UserWarning)
 # but this didn't get rid of them -_-
+
 
 plt.rcParams['figure.dpi'] = 150
 plt.rcParams['text.usetex'] = True
@@ -37,10 +40,11 @@ seq_b22 = pd.concat([seq_set1_new, seq_set1]) #, seq_set2, seq_set3, seq_set4, s
 validation_seqs = pd.read_csv('../data/validation_set.csv')
 # NOTE: There are about 22 sequences in the validation set from the An et al. paper
 # those have very negative B_22 values. For the present purpose, I'm discarding those
-validation_seqs = validation_seqs.iloc[:42]
+validation_seqs = validation_seqs.iloc[42:].reset_index(drop=True)
 
+print(validation_seqs.head())
 
-def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True, start_count=0):
+def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True, optimize_for='negative', start_count=0):
 	"""
 	This method does a pure learning of the Bayesian Optimizer
 	and records a "training history", at each training step by storing the 
@@ -51,10 +55,16 @@ def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True, start_c
 	# tracks the history as we go along
 	indiv_step_hist = []
 
+	training_data.reset_index(drop=True, inplace=True)
+	test_data.reset_index(drop=True, inplace=True)
+
 	print("Initiating optimization")
 	for i in range(len(training_data)):
 		sequence, computed_b22_val = training_data.iloc[i]
-		bo_alg.tell(key, sequence, -computed_b22_val)
+		if optimize_for == 'negative':
+			bo_alg.tell(key, sequence, -computed_b22_val)
+		else:
+			bo_alg.tell(key, sequence, computed_b22_val)
 		if predict_labels == True:
 			predicted_labels = []
 			# now check how well the prediction goes
@@ -64,12 +74,18 @@ def train_bo_seqs(bo_alg, training_data, test_data, predict_labels=True, start_c
 				test_seq, test_seq_b22, seq_source_category = test_data.iloc[j]
 				pred_b22 = bo_alg.predict(key, test_seq)
 				# pred_b22 has shape (3,) and contains prediction, err, and epistemic err
-				predicted_labels.append(-np.array(pred_b22))
+				if optimize_for == 'negative':
+					predicted_labels.append(-np.array(pred_b22))
+				else:
+					predicted_labels.append(np.array(pred_b22))
 			tf = time.time()
 			print(f'Took {tf-ti} secs to predict for {len(predicted_labels)} sequences in step {start_count+i+1}')
 			# add predictions of this step to history
-			predictions = pd.Series(-np.array(predicted_labels)[:, 0], name=f'Pred {start_count+i+1} B22')
-			residuals = pd.Series(np.array(predicted_labels)[:, 0] - test_data['Numeric Label'],
+			if optimize_for == 'negative':
+				predictions = pd.Series(-np.array(predicted_labels)[:, 0], name=f'Pred {start_count+i+1} B22')
+			else:
+				predictions = pd.Series(np.array(predicted_labels)[:, 0], name=f'Pred {start_count+i+1} B22')	
+			residuals = pd.Series(np.array(predicted_labels)[:, 0] - test_data['Numeric Label'].to_numpy(),
 						 	name=f'Pred {start_count + i + 1} Residual')
 			# for uncertainty, sum both statistical and systematic uncertainty in quadrature
 			errors = pd.Series(np.sqrt(np.array(predicted_labels)[:, 1]**2
@@ -135,6 +151,22 @@ def plot_training_hist_legacy(training_hist, num_train_steps, train_lengths=None
 	plt.show()
 
 
+def predict_for_sequences(bo_algorithm, sequence_list, save_file_name='predictions.csv'):
+	"""
+	A utility method for when I want to see what the 
+	"""
+	predictions = []
+	for seq  in sequence_list:
+		predictions.append(bo_algorithm.predict(key, seq))
+	pred_array = np.array(predictions)
+	pred_dataframe = pd.DataFrame(data={
+				'Sequence': sequence_list,
+				'Prediction': pred_array[:,0],
+				'Prediction Uncertainity': np.sqrt(pred_array[:,1]**2 + pred_array[:,2]**2)
+				})
+	pred_dataframe.to_csv(save_file_name, index=False)
+	
+
 def plot_training_indiv(training_hist, num_train_steps):
 	steps = np.linspace(1, num_train_steps, num_train_steps)
 	for seq, seq_hist in training_hist.groupby('Sequence'):
@@ -156,85 +188,68 @@ def plot_training_indiv(training_hist, num_train_steps):
 
 
 if __name__ == "__main__":
+
+	next_seqs = ['EAKSAHSNKPEKRRKQQPREF', 'MEEAPARRRRQRPKQAPQREL', 'RKKEREEMSEPPKSQSQEQRE',
+   	'RPPRKKPAAARAPSQPSKKRR', 'TQAKREPRRPEPPRRRRPQSE', 'MQQQRPRKRSEPPARHRRRSQ',
+	'ETAQARPRQPRPPRKQKQRQK', 'QTESHEEPPQKKPRPAKRSRR', 'KRRQSKEQPAARRQKKQATKQ',
+	'QAAHRRPNRRQSQQKPATKRR', 'QRQSREEWPARPPAQPPRRRR', 'MEREESEQRPAEPKQPRRRRR',
+ 	'KSQKQQRRRRAPPQARRAKPA', 'CTKRASPRRAKAEAPPQDKEC', 'MEESQQPRQARQPRSRRPPQE',
+  	'RAKSRQPREPKKRRRQQSKQQ', 'ETRSDHQHQPQPPRKPRRKMR', 'EQEQEAPAPPKQRKSQRQSQQ',
+	'REPLDSPTPRQPKHKSRRFSE', 'MSPESSKVRPKQEQSPPRQQT', 'RTRSRATRARKPPRKKQRRAE',
+ 	'KTRAPRRRPPRTQEETKEQQR', 'MRQQQEQQATEEEQQRPRPPP', 'MAESQQPKRPRRSSARQEPPQ', 'KEMSTHKRRPRPTQARRQEPA']
 	# The keyword arguments passed to python when running this file
 	args = sys.argv
 
+	init50_r1_seqs = pd.read_csv('../data/new/init50/seq_b22_data_50_r1.csv')
+	init50_r2_seqs = pd.read_csv('../data/new/init50/seq_b22_data_50_r2.csv')
+	init50_r3_seqs = pd.read_csv('../data/new/init50/seq_b22_data_init50_r3.csv')
 	# Initialize the Bayesian Optimization algorithm
 	b_optimizer = wazy.BOAlgorithm()
 	slice_after = 50
 	
+	init_seq_ctd = pd.read_csv('../data/ctd/sequences_and_labels_0.csv')
 	if len(args) > 1:
 		slice_after = int(args[1])
 
-	num_train_init, train_hist_init = train_bo_seqs(b_optimizer, seq_b22.iloc[:slice_after], validation_seqs,
-												 predict_labels=False)
+	ctd_train_data, ctd_test_data = train_test_split(init_seq_ctd, test_size=20, shuffle=True)
+	ctd_test_data['Source Category'] = ['wherever']*len(ctd_test_data)
+	num_train_init, train_hist_init = train_bo_seqs(b_optimizer, ctd_train_data, ctd_test_data, #seq_b22.iloc[:slice_after], validation_seqs,
+												 optimize_for='positive', predict_labels=True)
+	#predict_for_sequences(b_optimizer, next_seqs)
 
-	num_train_steps, training_hist = train_bo_seqs(b_optimizer, seq_b22.iloc[slice_after:slice_after+50], validation_seqs,
-												 predict_labels=True, start_count=slice_after)
+	'''num_train_step_r1, training_hist_r1 = train_bo_seqs(b_optimizer, init50_r1_seqs, validation_seqs,
+												 predict_labels=False, start_count=slice_after)
+	num_train_steps_r2, training_hist_r2 = train_bo_seqs(b_optimizer, init50_r2_seqs, validation_seqs,
+												 predict_labels=False, start_count=slice_after+25)
+	num_train_steps_r3, training_hist_r3 = train_bo_seqs(b_optimizer, init50_r2_seqs, validation_seqs,
+												 predict_labels=True, start_count=slice_after+50)'''
+	'''num_train_steps, training_hist = train_bo_seqs(b_optimizer, seq_b22.iloc[slice_after:slice_after+50], validation_seqs,
+												 predict_labels=True, start_count=slice_after)'''
 
-	print('Next sequences to simulate:', b_optimizer.batch_ask(key, 25))
-	time_stamp = time.strftime("%b%d_%H-%M", time.gmtime()).lower() # e.g. feb14
-	training_hist.to_csv(f"training_hist_{time_stamp}.csv", index=False)
-
+	'''time_stamp = time.strftime("%b%d_%H-%M", time.gmtime()).lower() # e.g. feb14
+	training_hist_r3.to_csv(f"training_hist_{time_stamp})an_et_al.csv", index=False)
+	'''
+	#print('Next sequences to simulate:', b_optimizer.batch_ask(key, 25))
 	#training_hist.
-	training_hist_prev = pd.read_csv('training_hist_feb27_subset1.csv')
+	'''training_hist_prev = pd.read_csv('training_hist_feb27_subset1.csv')
 	train_hist_50_100 = pd.read_csv("training_hist_51_100.csv")
 	train_hist_100_150 = pd.read_csv('training_hist_mar20_101_150.csv')
-	train_hist_150_200 = pd.read_csv('training_hist_mar20_151_200.csv')
-	total_train_hist = pd.concat([training_hist_prev, train_hist_50_100.drop('Sequence', axis=1),
+	train_hist_150_200 = pd.read_csv('training_hist_mar20_151_200.csv')'''
+	'''total_train_hist = pd.concat([training_hist_prev, train_hist_50_100.drop('Sequence', axis=1),
 							   train_hist_100_150.drop('Sequence', axis=1),
 							   train_hist_150_200.drop('Sequence', axis=1)],
-							   axis=1)
+							   axis=1)'''
 	
+	#next25_seq_hist = pd.read_csv('training_hist_mar22_12-08.csv')
+	'''train_hist_init = pd.read_csv('training_hist_init50_r2_an_etal.csv')
+	cumulative_hist = pd.concat([train_hist_init, training_hist_r3.drop('Sequence', axis=1)]#training_hist_r1.drop("Sequence", axis=1),
+							  #training_hist_r2.drop('Sequence', axis=1)]
+							 , axis=1)
+	cumulative_hist.to_csv('training_hist_init50_r3_an_etal.csv', index=False)
 	#training_hist.to_csv(f"training_hist_{time_stamp}.csv", index=False)
 	#total_train_hist.to_csv(f"total_training_hist_mar20.csv", index=False)
 	#plot_training_hist(training_hist_prev, 50, [50])
-	#plot_training_hist_legacy(total_train_hist, 200, [200])
-	'''num_train_steps2, training_hist2 = train_bo_seqs(b_optimizer, seq_set5, validation_seqs, predict_labels=True)
 	
-	plot_training_hist(training_hist2, num_train_steps2)'''
-
-	#total_train_steps = 63 + 21
-	#training_hist = pd.read_csv('training_hist_feb11 (copy).csv')
-	#train_hist2 = pd.read_csv('training_hist_feb14_last.csv')
-	#train_hist2 = xverl
-	#total_train_hist = pd.read_csv('training_hist_feb14.csv')#pd.concat([training_hist, train_hist2], axis=1)
-	#otal_train_hist.to_csv('training_hist_feb14.csv', index=False)
-	#num_train_steps = 42
-	#plot_training_hist(total_train_hist, total_train_steps, [21, 10, 11, 21, 21])
-	#plot_training_indiv(training_hist, num_train_steps)
-
-	   # print('Using validation sequences for training')
-	'''for i in range(len(validation_seqs)):
-		seq, label = validation_seqs.iloc[i]
-		b_optimizer.tell(key, seq, label)
-		print('Successfully trained with ', seq)'''
-
-#seq_to_predict = 'YSPTSPSYSPTSPSYSPTSPS'
-#print('Predicted value for sequence', seq_to_predict)
-#print(b_optimizer.predict(key, seq_to_predict))
-
-'''print('Asking Wazy to suggest next 10 sequences')
-ti = time.time()
-print('Next 10 sequences to predict:\n', b_optimizer.batch_ask(key, 10))
-tf = time.time()
-delta_t = tf - ti
-print('Time taken for this prediction', delta_t)'''
-
-
-'''data = pd.read_csv('b22_bo_training.csv')
-
-for index, step_data in data.groupby('Index'):
-	fig, ax = plt.subplots(figsize=(6,6))
-	print('Number of steps for this sequence', len(step_data))
-	plt.errorbar(x=np.linspace(21-len(step_data), 21, len(step_data)),
-				 y=step_data['Prediction'],
-				 yerr=step_data['Pred_uncert'], capsize=3, ls='', marker='o', c='#aaaaff', label=f'Seq {index}')
-	plt.axhline(y=seq_b22['Numeric Label'].iloc[index], xmin=0, xmax=1, c='tab:pink', label='True Computed Values')
-	plt.xlabel('Training Step')
-	plt.ylabel('Predicted $B_{2}$')
-	plt.title('Sequence: ' + seq_b22['Sequence'].iloc[index])
-	plt.tight_layout()
-	plt.legend()
-	plt.savefig('pred_figures/seq_{0}_pred.png'.format(index), dpi=150)
-	#plt.show()'''
+	plot_training_hist_legacy(cumulative_hist, 125, [50, 25, 25, 25])'''
+	train_hist_init.to_csv('ctd_condensate_train50.csv', index=False)
+	plot_training_hist_legacy(train_hist_init, num_train_init, [50])
