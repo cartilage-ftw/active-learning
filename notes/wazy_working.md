@@ -17,8 +17,12 @@ Right as you `import wazy` the following are imported
 
 In principle, we can define a `model_config` ourselves separately and pass that as an arguemnt to `boa = BOAlgorithm(model_config=config)`, and adjust the network parameters there as well.
 
-* When you call `tell()`, it stores the seq and label, and at the same time calls the `_get_reps()` method (in the same class) to get a "representation" of the sequence.
+* When you call `tell()`, it stores the seq and label, and at the same time calls the `_get_reps()` method (in the same class) to get a "representation" of the sequence. This method doesn't 
     * if your model is pre-trained, it calls `jax_unirep.get_reps()` which returns a multi-dimensional array, which includes the feature vector (from UniRep).
     * Note that the `encode_seq()` method in `utils.py` (which simply returns a naive, one-hot encoded representation) is not called unless you say you don't want to use your pre-trained model.
     * => We can tune this to our choice, create our own method for encoding, and therefore invoke our own "featurization" (if we want to study the effect of that).
-* 
+* Training is only performed when you call `BOAlgorithm.predict()`, if there are sequences it knows it hasn't trained on.
+    * In that case, it either sets up the ensemble (if training has never been called before) by calling `setup_ensemble_train()` from `mlp.py`
+        * in `setup_ensemble_train()` there's a parameter `dual=True`. This is to decide the form of the loss function (if true, use adversarial training, otherwise 'naive')
+
+    * The actual training is done by `exec_ensemble_train()` also in `mlp.py`.
