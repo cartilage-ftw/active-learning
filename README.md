@@ -15,7 +15,7 @@ Apparently `metapredict` has a lot of dependencies and it'll download large libr
 pip install cython metapredict wazy localcider
 ```
 # Calculation of second virial coefficient
-The second virial coefficient $$B_{22} $$   \( B_{22} \) is a key indicator of protein self-interactions in solution. It quantifies pairwise intermolecular forces between protein molecules, relating directly to the radial distribution function   \( g(r) \). This relationship is expressed as:
+The second virial coefficient ($$B_{22} $$) is a key indicator of protein self-interactions in solution. It quantifies pairwise intermolecular forces between protein molecules, relating directly to the radial distribution function   $$g(r)$$. This relationship is expressed as:
 
 $$
 B_{22} =- 2 \pi \int_0^{\infty} (g(r) - 1) r^2 dr
