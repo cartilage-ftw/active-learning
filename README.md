@@ -22,6 +22,6 @@ B_{22} =- 2 \pi \int_0^{\infty} (g(r) - 1) r^2 dr
 $$
 
 where:
-- \B_{22} \ is the second virial coefficient,
+- $$\B_{22} \$$ is the second virial coefficient,
 - \ g(r) \ is the radial distribution function,
 - \ r \ is the distance from a reference particle.
