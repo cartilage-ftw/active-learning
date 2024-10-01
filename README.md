@@ -23,5 +23,5 @@ $$
 
 where:
 - $$B_{22} $$ is the second virial coefficient,
-- \ g(r) \ is the radial distribution function,
-- \ r \ is the distance from a reference particle.
+- $$g(r) $$ is the radial distribution function,
+- $$r$$ is the distance from a reference particle.
