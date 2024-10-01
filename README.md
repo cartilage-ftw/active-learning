@@ -16,9 +16,11 @@ pip install cython metapredict wazy localcider
 ```
 # Calculation of second virial coefficient
 The second virial coefficient ($$B_{22} $$) is a key indicator of protein self-interactions in solution. It quantifies pairwise intermolecular forces between protein molecules, relating directly to the radial distribution function   $$g(r)$$. Second virial coefficient is defined as:
+
 $$
 B_{22} = - 2 \pi \int_0^{\infty} \left( \exp\left(\frac{-U(r)}{k_B T}\right) - 1 \right) r^2 dr
 $$
+
 where $$U(r)$$ is the potential energy at radius $$r$$, $$k_B$$ is the Boltzmann’s constant and $$T$$ the temperature.
 
 We compute $$B_{22}$$ from the radial distribution function $$g(r)$$:
